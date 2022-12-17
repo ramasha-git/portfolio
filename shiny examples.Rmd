@@ -1,0 +1,223 @@
+---
+title: "shiny"
+output: html_notebook
+---
+
+
+
+```{r}
+load('employee.Rdata')
+```
+
+
+```{r}
+library(shiny)
+library(ggplot2)
+library(dplyr)
+
+ui = fluidPage(
+  titlePanel('Employees income depending on their age and the department they work at'),
+  ###########
+  sliderInput(
+    "slider", 
+    label = "Age",
+    min = 18, 
+    max = 60, 
+    value = c(18, 60)
+  ),
+  ###########
+  sliderInput(
+    "slider2", 
+    label = "Income",
+    min = 0, 
+    max = 20000, 
+    value = c(0, 20000),
+    step = 5000
+  ),
+  ############ 
+  radioButtons(
+    "facet_radio",
+    label = "Facet by Department groups",
+    choices = list(
+      "Yes" = "yes",
+      "No" = "no"
+    ),
+    selected = "no"
+  ),
+  
+  ############ 
+  checkboxGroupInput(
+      "checkGroup", 
+      label = "Choose departments", 
+      choices = c(unique(employee$Department)),
+      selected = 'Sales'
+  ),
+  hr(),
+  plotOutput("plot")
+  
+)
+##########
+server = function(input, output){
+  output$plot = renderPlot({
+    p = employee %>% 
+      filter((Age > input$slider[1]) & (Age < input$slider[2])) %>%
+      filter((MonthlyIncome > input$slider2[1]) & (MonthlyIncome < input$slider2[2])) %>%
+      filter(Department == input$checkGroup) %>% 
+     ggplot(aes(x=MonthlyIncome, y=Age, color =  Department)) +
+      geom_point() + theme_bw()
+    
+    if(input$facet_radio == "yes"){
+      p = p + facet_wrap(~ Department)
+    }
+   
+    p
+   })
+}
+
+shinyApp(ui = ui, server = server)
+```
+
+## Shinydashboard
+
+
+```{r}
+load('occupations.Rdata')
+```
+
+```{r}
+
+occupations %>%
+  group_by(Occupation) %>%
+  filter(Age >50)%>%
+  summarise(keskpalk = mean(Wage, na.rm = T)) %>%
+  ungroup() -> keskpalk
+
+
+# suurim palk on 239000.00 CMM-MISCELLANEOUS MATHEMATICAL SCIENCE OCCUPATIONS
+which(keskpalk$keskpalk == max(keskpalk$keskpalk)) #13
+print(keskpalk[13,])
+
+###########
+occupations %>%
+  #ungroup() %>%
+  group_by(Sex, Occupation) %>%
+  summarise(keskpalk = mean(Wage, na.rm = T)) -> keskpalk_sooloikes
+
+
+###########
+occupations %>%
+  group_by(Sex) %>%
+  summarise(keskpalk = mean(Wage, na.rm = T)) -> keskpalk_sugu
+
+#naised saavad 34.3% vähem palka
+palkade_erinevus_soolõikes = round(((1 - 31249.71/47556.53)*100),1) 
+palkade_erinevus_soolõikes
+
+
+```
+
+
+```{r}
+library(shinydashboard)
+library(shiny)
+library(shinyWidgets)
+library(DT)
+
+ui = dashboardPage(
+  dashboardHeader(),
+  dashboardSidebar(titlePanel('Occupations'),
+  ###########
+  selectInput("occupation_select",
+             "Choose occupations:",
+              choices = sort(unique(occupations$Occupation)),
+              multiple = TRUE,
+              selectize = TRUE,
+              selected = "SAL-CASHIERS"
+            ),
+  ###########
+  checkboxGroupInput("gender_checkbox",
+                    "Gender:",
+                    choices = sort(unique(occupations$Sex)),
+                    selected = c("Female", "Male"),
+                    inline = T
+                    ),
+  ############ 
+  sliderInput("age_slider",
+              "Age:",
+              min = min(occupations$Age, na.rm = T),
+              max = max(occupations$Age, na.rm = T),
+              value = c(min(occupations$Age, na.rm = T), max(occupations$Age, na.rm = T)),
+              step = 1
+              ),
+  
+  hr()),
+  dashboardBody(
+    box(
+      title = "Average salary distribution by occupation and sex", 
+      dataTableOutput("table"),
+      height = 650
+    ),
+    box(
+      title = "Average salary distribution by occupation", 
+      dataTableOutput("table2"),
+      height = 650
+    ),
+    infoBox(
+      value = "34.3 %",
+      title = "Difference in men's and women's wages"
+      #icon = icon("human")
+    ),
+    infoBox(
+      value = "239000",
+      title = "CMM-MISCELLANEOUS MATHEMATICAL SCIENCE OCCUPATIONS"
+      #icon = icon("human")
+    )
+  )
+)
+
+server = function(input, output){
+  output$table = renderDataTable({
+    
+    p = occupations %>% 
+      filter((Age > input$age_slider[1]) & (Age < input$age_slider[2])) %>%
+      group_by(Sex, Occupation) %>%
+      #filter(Sex == input$gender_checkbox) %>%
+      #filter(Occupation == input$occupation_select) %>%
+      summarise(Average = round(mean(Wage, na.rm = T))) %>%
+      ungroup()-> p ### see ei tööta
+  
+    
+    datatable(p, 
+              options = list(pageLength = 5,
+                             lengthMenu = c(5, 10)))%>% 
+      formatStyle(
+        "Average",
+        background = styleColorBar(c(0, max(p$Average)), "lightgreen")
+      )
+    })
+    
+    output$table2 = renderDataTable({
+    
+    b = occupations %>% 
+      filter((Age > input$age_slider[1]) & (Age < input$age_slider[2])) %>%
+      #filter(Occupation == input$occupation_select) %>%
+      #filter(Sex == input$gender_checkbox) %>%
+      group_by(Occupation) %>%
+      summarise(Average = round(mean(Wage, na.rm = T))) -> b ### see ei tööta
+  
+     datatable(b, 
+              options = list(pageLength = 5,
+                             lengthMenu = c(5, 10))) %>% 
+      formatStyle(
+        "Average",
+        background = styleColorBar(c(0, max(b$Average)), "lightgreen")
+      ) 
+   })
+}
+
+
+shinyApp(ui = ui, server = server)
+```
+
+
+
