@@ -1,0 +1,372 @@
+---
+title: "ilmajaamad demo"
+runtime: shiny
+output: html_document
+date: "2022-10-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(zoo)
+library(dygraphs)
+library(plotly)
+library(htmlwidgets)
+library(dplyr)
+library(shiny)
+library(shinyWidgets)
+library(magrittr)
+
+########## Andmete sisselugemine
+
+### Areas by country
+
+Number_of_Stations_270421_sq <- read_excel("Number_of_Stations_270421.xlsx", 
+                                           sheet = "Leht1", col_names = FALSE, n_max = 2)
+Number_of_Stations_270421_sq <- Number_of_Stations_270421_sq %>% discard(~any(is.na(.) | . ==""))
+
+
+### Current year number of stations 
+
+Number_of_Stations_270421 <- read_excel("Number_of_Stations_270421.xlsx",
+                                        sheet = "Leht1", skip = 1)
+
+colnames(Number_of_Stations_270421)[1] ="Parameeter"
+colnames(Number_of_Stations_270421)[2] ="Metoodika"
+
+Number_of_Stations_270421$Parameeter <-na.locf(Number_of_Stations_270421$Parameeter)
+Number_of_Stations_270421 <- Number_of_Stations_270421 %>% select(-contains("km2"))
+
+
+### Current year number of stations long format
+
+Number_of_Stations_270421_norm <- Number_of_Stations_270421 %>% gather(variable, value, - Parameeter, - Metoodika)
+
+Number_of_Stations_270421_norm <- Number_of_Stations_270421_norm[Number_of_Stations_270421_norm$Metoodika != "Manual precipitation intensity" ,] #eemaldan andmed, sest näeb halb graafikul välja (ainult nullväärtused)
+Number_of_Stations_270421_norm <-Number_of_Stations_270421_norm[!is.na(Number_of_Stations_270421_norm$Parameeter),]
+
+
+
+### Previous year
+
+Number_of_Stations_prev <- read_excel("Number_of_Stations_prev.xls",
+                                      sheet = "Master sheet modified", skip = 2)
+
+colnames(Number_of_Stations_prev)[1] ="Parameeter"
+colnames(Number_of_Stations_prev)[2] ="Metoodika"
+
+Number_of_Stations_prev$Parameeter <-na.locf(Number_of_Stations_prev$Parameeter)
+Number_of_Stations_prev <- Number_of_Stations_prev %>% select(-contains("sqkm"))
+
+
+### Previous year number of stations long format
+
+Number_of_Stations_prev_norm <- Number_of_Stations_prev %>% gather(variable, value, - Parameeter, - Metoodika)
+
+
+### andmed kokku
+
+andmed = merge(Number_of_Stations_270421_norm,Number_of_Stations_prev_norm, all=T, by=c("Parameeter", "Metoodika", "variable"))
+colnames(andmed) = c("Parameeter","Metoodika","Riik","2021","2013")
+
+andmed_long <- andmed %>% gather(Aasta, Jaamad, 4:5)
+andmed_long$Aasta = as.factor(andmed_long$Aasta)
+
+#Jätame Greenland ja Svalbard välja
+andmed_long %>%
+    filter(Riik != "Greenland" & Riik != "Svalbard" ) -> andmed_long
+```
+
+
+```{r}
+
+#Graafikud
+
+# Bar chart for each country
+plot_riik <- function(riik, u) {
+    
+    if(riik == "Estonia") { #lisatingimus et vältida dubleerivaid nimetusi legendis
+        country <- andmed_long %>% filter(Riik == riik & Parameeter == u) %>%
+            group_by(Metoodika) %>% 
+            arrange(Metoodika) %>%
+            plot_ly(
+                x = ~Aasta, 
+                y = ~Jaamad, 
+                color= ~ Metoodika,
+                #colors = 'Reds',
+                type = 'bar', 
+                legendgroup=~Metoodika,
+                showlegend = T) %>% 
+            layout(xaxis = list(title = riik))
+        print(country)
+    }
+    else {
+        country <- andmed_long %>% filter(Riik == riik & Parameeter == u) %>%
+            group_by(Metoodika) %>% 
+            arrange(Metoodika) %>%
+            plot_ly(
+                x = ~Aasta, 
+                y = ~Jaamad, 
+                color= ~ Metoodika,
+                #colors = 'Reds',
+                type = 'bar', 
+                legendgroup=~Metoodika,
+                showlegend = F) %>% 
+            layout(xaxis = list(title = riik))
+        print(country)
+        
+    }
+}
+
+#Bar chart stack mode merged countries
+plot_riigid <- function(riigid,v) {
+    
+    print(subplot(riigid, titleX = T, shareY = T) %>%
+              layout(barmode = 'stack', showlegend = T, title = list(text = paste(v), x = 0.35, y = 0.95),
+                     yaxis = list(title = 'Nr of measurements')))
+}
+
+
+
+########## 
+#Graafiku funktsioon iga parameetri jaoks
+
+plot_param <- function(x){
+    riigid <- vector()
+    for(i in unique(andmed_long$Riik)) { 
+        output <- plot_riik(i, x)
+        riigid[i] <- output    
+    }
+    plot_riigid(riigid,x)
+    
+}
+
+graafikud <- list()
+for(b in unique(andmed_long$Parameeter)) { 
+    outputb <- plot_param(b)
+    graafikud[[b]] <- outputb    
+}
+```
+
+```{r}
+### Current year stations per km2
+
+stations_perkm2_2021 <- read_excel("Number_of_Stations_270421.xlsx",
+                                        sheet = "Leht1", skip = 1)
+
+colnames(stations_perkm2_2021)[1] ="Parameeter"
+colnames(stations_perkm2_2021)[2] ="Metoodika"
+
+stations_perkm2_2021$Parameeter <-na.locf(stations_perkm2_2021$Parameeter)
+stations_perkm2_2021 <- stations_perkm2_2021 %>% select(contains("Parameeter")|contains("Metoodika")|contains("km2"))
+colnames(stations_perkm2_2021) = c("Parameeter","Metoodika",'Denmark','Grennland', 'Estonia', 'Finland', 'Iceland', 'Latvia','Lithuania', 'Norway', 'Svalbard', 'Sweden')
+library(dplyr)
+stations_perkm2_2021 %>% 
+    mutate_if(is.numeric, round)-> stations_perkm2_2021
+
+
+stations_perkm2_2021 %>%
+    filter(Metoodika == "Total") -> stations_perkm2_2021
+
+stations_perkm2_2021_norm <- stations_perkm2_2021 %>% gather(variable, value, - Parameeter, - Metoodika)
+
+stations_perkm2_2021_norm <-stations_perkm2_2021_norm[!is.na(stations_perkm2_2021_norm$value),]
+
+
+
+### Previous year stations per km2
+
+stations_perkm2_prev <- read_excel("Number_of_Stations_prev.xls",
+                                      sheet = "Master sheet modified", skip = 2)
+
+colnames(stations_perkm2_prev)[1] ="Parameeter"
+colnames(stations_perkm2_prev)[2] ="Metoodika"
+
+stations_perkm2_prev$Parameeter <-na.locf(stations_perkm2_prev$Parameeter)
+stations_perkm2_prev <- stations_perkm2_prev %>% select(contains("Parameeter")|contains("Metoodika")|contains("sqkm"))
+colnames(stations_perkm2_prev) = c("Parameeter","Metoodika",'Norway', 'Svalbard','Denmark','Grennland', 'Finland', 'Iceland', 'Sweden','Estonia')
+
+stations_perkm2_prev %>%
+    filter(Metoodika == "Total") -> stations_perkm2_prev
+
+stations_perkm2_prev_norm <- stations_perkm2_prev %>% gather(variable, value, - Parameeter, - Metoodika)
+stations_perkm2_prev_norm <-stations_perkm2_prev_norm[!is.na(stations_perkm2_prev_norm$value),]
+
+
+### andmed kokku
+
+andmed_km2 = merge(stations_perkm2_2021_norm,stations_perkm2_prev_norm, all=T, by=c("Parameeter", "Metoodika", "variable"))
+colnames(andmed_km2) = c("Parameeter","Metoodika","Riik","2021","2013")
+
+
+andmed_long_km2 <- andmed_km2 %>% gather(Aasta, Jaamad, 4:5)
+andmed_long_km2 <-andmed_long_km2[!is.na(andmed_long_km2$Jaamad),]
+andmed_long_km2$Aasta = as.factor(andmed_long_km2$Aasta)
+
+#Jätame Greenland ja Svalbard välja
+andmed_long_km2 %>% 
+    filter(Riik != "Greenland" & Riik != "Grennland" & Riik != "Svalbard" ) -> andmed_long_km2
+
+
+```
+
+```{r}
+########
+#Graafikud
+
+#Bar chart for each country
+plot_riik_km2 <- function(riik2, u2) {
+    
+    if(riik2 == "Estonia") { #lisatingimus et vältida dubleerivaid nimetusi legendis
+        country2 <- andmed_long_km2 %>% filter(Riik == riik2 & Parameeter == u2) %>%
+            group_by(Metoodika) %>% 
+            arrange(Metoodika) %>%
+            plot_ly(
+                x = ~Aasta, 
+                y = ~Jaamad, 
+                color= ~ Metoodika,
+                #colors = 'Reds',
+                type = 'bar', 
+                legendgroup=~Metoodika,
+                showlegend = T) %>% 
+            layout(xaxis = list(title = riik2))
+        print(country2)
+    }
+    else {
+        country2 <- andmed_long_km2 %>% filter(Riik == riik2 & Parameeter == u2) %>%
+            group_by(Metoodika) %>% 
+            arrange(Metoodika) %>%
+            plot_ly(
+                x = ~Aasta, 
+                y = ~Jaamad, 
+                color= ~ Metoodika,
+                #colors = 'Reds',
+                type = 'bar', 
+                legendgroup=~Metoodika,
+                showlegend = F) %>% 
+            layout(xaxis = list(title = riik2))
+        print(country2)
+        
+    }
+}
+
+#Bar chart stack mode merged countries
+plot_riigid_km2 <- function(riigid2,v2) {
+    
+    print(subplot(riigid2, titleX = T, shareY = T) %>%
+              layout(barmode = 'stack', showlegend = T, title = list(text = paste(v2), x = 0.25, y = 0.95),
+                     yaxis = list(title = 'km2 per station')))
+}
+
+
+
+########## 
+#Graafiku funktsioon iga parameetri jaoks
+
+plot_param_km2 <- function(x2){
+    riigid2 <- vector()
+    for(i2 in unique(andmed_long_km2$Riik)) { 
+        output2 <- plot_riik_km2(i2, x2)
+        riigid2[i2] <- output2    
+    }
+    plot_riigid_km2(riigid2,x2)
+    
+}
+
+
+
+#Graafik 'snow depth'
+#plot_param('Snow depth')
+
+graafikud_km2 <- list()
+for(b2 in unique(andmed_long_km2$Parameeter)) { 
+    outputb2 <- plot_param_km2(b2)
+    graafikud_km2[[b2]] <- outputb2    
+}
+
+
+```
+
+## Results {.tabset}
+
+### Snow depth
+
+```{r, out.width="120%"}
+snowdepth = plot_param('Snow depth')
+snowdepth
+
+```
+<br><br>
+
+
+**Text**
+
+ 
+<br><br>
+```{r, out.width="90%"}
+snowdepth_km2 = plot_param_km2('Snow depth')
+snowdepth_km2
+```
+
+### Precipitation
+
+```{r, out.width="120%"}
+precipitation = plot_param('Precipitation')
+precipitation
+
+```
+<br><br>
+
+**Text**
+
+<br><br>
+```{r, out.width="90%"}
+precipitation_km2 = plot_param_km2('Precipitation')
+precipitation_km2
+
+```
+
+### Random
+
+```{r, echo = FALSE}
+inputPanel(
+    selectInput("choose_data", label = "Select data",
+              choices = c('Nr of stations', 'km2 per station'), selected ="Snow depth" ),
+    selectInput("choose_parameter", label = "Select parameter",
+              choices = unique(andmed_long_km2$Parameeter), selected ="Snow depth" )
+)
+
+renderPrint({
+  #par(mar = c(4, 4, .1, .5))
+    if(choose_data == 'Nr of stations'){
+        print(graafikud[[choose_parameter]])
+    }else{
+        print(graafikud_km2[[choose_parameter]])
+    }
+})
+```
+<br>
+<br>
+```{r, echo = FALSE}
+inputPanel(
+    selectInput("choose_data", label = "Select data",
+              choices = c('Nr of stations', 'km2 per station'), selected ="Snow depth" ),
+    selectInput("choose_parameter", label = "Select parameter",
+              choices = unique(andmed_long_km2$Parameeter), selected ="Snow depth" )
+)
+
+renderPrint({
+  #par(mar = c(4, 4, .1, .5))
+    if(choose_data == 'Nr of stations'){
+        print(graafikud[[choose_parameter]])
+    }else{
+        print(graafikud_km2[[choose_parameter]])
+    }
+})
+```
+
+rmarkdown::render("ilmajaamad demo.Rmd")
