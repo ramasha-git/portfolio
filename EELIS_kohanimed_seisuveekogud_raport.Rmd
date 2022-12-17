@@ -1,0 +1,860 @@
+---
+title: "EELISe ja KNR-i andmestike kohanimede võrdlemine"
+output: html_document
+date: '2022-07-11'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+```{r include=FALSE}
+## Teegid
+library(readr)
+library(plyr)
+library(dplyr)
+library(DT)
+library(stringr)
+library(readxl)
+library(validate)
+
+
+## Kohanimede andmed sisse 
+# tavalised objektid sisse
+KN_tavalised <- read_excel("KN_valjavote_ilma_ryhmata_EELISele.xlsx")
+#rühmaobjektid sisse
+KN_ryhmitatud <- read_excel("KN_valjavote_nimega_ylemad_ja_alamad_EELISele.xlsx")
+
+# puhastame andmed ja paneme tabelid kokku
+KN_ryhmitatud <-KN_ryhmitatud[!is.na(KN_ryhmitatud$KOHANIME_ID),c(1:9)]
+colnames(KN_ryhmitatud) <- toupper(colnames(KN_ryhmitatud))
+KN_tavalised = KN_tavalised[ -c(6) ]
+colnames(KN_tavalised) <- toupper(colnames(KN_tavalised))
+colnames(KN_ryhmitatud)[2] <- "KOHANIME_OLEK"
+colnames(KN_ryhmitatud)[3] <- "KOHANIME_STAATUS"
+kohanimed<- rbind(KN_tavalised,KN_ryhmitatud)
+
+## EELIS: andmed sisse (seisuga 06.05.2022)
+EELIS06052022 <- read_excel("EELIS06052022.xlsx")
+
+
+#valime vooluveeobjektid ja seisuveeobjektid (algavad "VEE1*", "VEE2*")
+EELIS06052022 <-EELIS06052022[grep("^VEE2|^VEE1",EELIS06052022$`KKR kood`), ]
+
+##Kohanimed on sisestatud EELISesse neljal erineval kujul:
+
+#ametlik põhinimi
+#ametlik põhinimi / ametlik rööpnimi
+#ametlik põhinimi (muu mitteametlik nimi)
+#(grupi nimi)
+
+##Seega eraldame ametlikust nimest kõik muud nimed ja loome nende jaoks eraldi tulbad
+
+#loome sulgudes olevatest nimedest eraldi tulba ja eemaldame ()
+#tulbas NIMIsulg.y on kõik grupi nimed ja mitteametlikud nimed
+EELIS06052022$NIMIsulg <- sub(".*\\(","",EELIS06052022$Nimi)
+EELIS06052022$NIMIsulg <- sub(")","",EELIS06052022$NIMIsulg)
+NIMIsulg=EELIS06052022[grepl(".*\\(", EELIS06052022$Nimi),]
+NIMIsulg= NIMIsulg[,c(1,11)]
+EELIS06052022=merge(EELIS06052022,NIMIsulg, by = "Id", all = T )
+
+# loome ilma sulgudeta kohanime ja eemaldame lõpust tühiku
+#selles tulbas on ametlik nimi, ametlik põhinimi / ametlik rööpnimi (muutmata kujul)
+EELIS06052022$NIMIP <- sub("\\(.*","",EELIS06052022$Nimi)
+EELIS06052022$NIMIP <- trimws(EELIS06052022$NIMIP)
+
+# eraldame rööpnime ja loome selle jaoks eraldi tulba
+EELIS06052022$ROOPnimi <- sub(".*\\/","",EELIS06052022$Nimi) 
+#veerus ROOPnimi on kõik lahtrid täidetud, 
+#kuid rööpnimed on ainult need, kus tulbas ROOPNIMI on vastava nime kõrval märge TRUE
+EELIS06052022$ROOPNIMI <- str_detect(EELIS06052022$Nimi, "/")
+EELIS06052022$ROOPnimi.y = ifelse(EELIS06052022$ROOPNIMI == T, 
+                                 EELIS06052022$ROOPnimi,NA)
+
+
+# loome grupi nime tuvastamaks eraldi tulba
+#kui väärtus on TRUE, tegemist on grupi nimega
+EELIS06052022$GRUPInimi <- str_detect(EELIS06052022$Nimi, '^\\(' )
+#### loome grupi nime tulba
+#selles tulbas on ainult grupi nimed, kui tegemist ei ole grupi nimega - väärtus on NA
+EELIS06052022$NIMIgrupp = ifelse(!is.na(EELIS06052022$NIMIsulg.y) & 
+                                        EELIS06052022$GRUPInimi == T, 
+                                        EELIS06052022$NIMIsulg.y,NA)
+
+#### loome mitteametliku nime tulba
+#selles tulbas on ainult mitteametliku nimega, vastasel juhul väärtus on NA
+EELIS06052022$NIMImtam = ifelse(!is.na(EELIS06052022$NIMIsulg.y) & 
+                                     EELIS06052022$GRUPInimi == F, 
+                                 EELIS06052022$NIMIsulg.y,NA)
+
+
+
+# eraldame ametliku nime rööpnimest ja loome selle jaoks eraldi tulba
+#veerus NIMIA on kõik lahtrid täidetud, kuid ametlikud nimed on ainult need, 
+#kus tulbas ROOPNIMI on vastava nime kõrval märge TRUE
+EELIS06052022$NIMIA <- sub("\\/.*","",EELIS06052022$Nimi)
+EELIS06052022$NIMIA <- trimws(EELIS06052022$NIMIA)
+
+#### loome ametliku nime tulba
+#selles tulbas on ainult ametlikud nimed, kui tegemist on grupi nimega - väärtus on NA
+EELIS06052022$NIMIametlik = ifelse(EELIS06052022$ROOPNIMI == T & 
+                                   EELIS06052022$GRUPInimi == F, 
+                                   EELIS06052022$NIMIA,EELIS06052022$NIMIP)
+
+## (Nimi teadmata) välja
+EELIS06052022=EELIS06052022[EELIS06052022$Nimi !="Nimi teadmata",]
+EELIS06052022=EELIS06052022[EELIS06052022$Nimi !="Nimi Teadmata",]
+
+##Eemaldame vahepealsed tulbad
+EELIS06052022 = EELIS06052022[ -c(11, 13:15, 17, 20) ]
+
+
+## andmekvaliteedi reeglid
+#install.packages('validate')
+library(validate)
+# 0. Masinvõrreldav info nagu on EELISes andmestruktuuris
+kohanimed_rules0 <- validator(
+    # kas EELISe objekti nimi muutmata kujul vastab kohanimele
+    Muutmata = Nimi %in% kohanimed$TAISNIMI 
+)
+
+check0 <- confront(EELIS06052022, kohanimed_rules0)#Rakendame reeglit
+summary(check0) #kokkuvõte tulemustest
+plot(check0)
+kohanimed_tulemus0= violating(EELIS06052022,check0)
+
+
+# 1. Ametlik nimi NIMIametlik
+kohanimed_rules1 <- validator(
+    # kas ametlikud nimed vastavad kohanimede registrile
+    NIMIametlik = NIMIametlik %in% kohanimed$TAISNIMI 
+        
+)
+
+check1 <- confront(EELIS06052022, kohanimed_rules1)#Rakendame reeglit
+summary(check1) #kokkuvõte tulemustest
+plot(check1)
+kohanimed_tulemus1= violating(EELIS06052022,check1)
+
+
+# 2. (muu mitteametlik nimi)
+kohanimed_rules2 <- validator(
+    # kas muud mitteametlikud nimed vastavad kohanimede registrile
+    Mitteametlik = NIMImtam %in% kohanimed$TAISNIMI 
+        
+)
+
+check2 <- confront(EELIS06052022, kohanimed_rules2)#Rakendame reeglit
+summary(check2) #kokkuvõte tulemustest
+
+plot(check2)
+kohanimed_tulemus2= violating(EELIS06052022,check2)
+
+
+# 3. Nimi mis on tulbas "muud nimed"
+kohanimed_rules3 <- validator(
+    # kas muude nimede tulbas olev info vastab kohanimede registrile
+    Muud.nimed = `Muud nimed` %in% kohanimed$TAISNIMI 
+        
+)
+
+check3 <- confront(EELIS06052022, kohanimed_rules3)#Rakendame reeglit
+summary(check3) #kokkuvõte tulemustest
+plot(check3)
+kohanimed_tulemus3= violating(EELIS06052022,check3)
+
+
+# 4. (grupi nimi)
+kohanimed_rules4 <- validator(
+    # kas grupi nimed vastavad kohanimede registrile
+    Grupi.nimi = NIMIgrupp %in% kohanimed$TAISNIMI 
+    )
+
+check4 <- confront(EELIS06052022, kohanimed_rules4)#Rakendame reeglit
+summary(check4) #kokkuvõte tulemustest
+
+plot(check4)
+kohanimed_tulemus4= violating(EELIS06052022,check4)
+
+# 5. Ametlik rööpnimi
+kohanimed_rules5 <- validator(
+    # kas ametlikud rööpnimed vastavad kohanimede registrile
+    ROOPnimi = ROOPnimi.y %in% kohanimed$TAISNIMI 
+        
+)
+
+check5 <- confront(EELIS06052022, kohanimed_rules5)#Rakendame reeglit
+summary(check5) #kokkuvõte tulemustest
+
+plot(check5)
+kohanimed_tulemus5= violating(EELIS06052022,check5)
+
+# 6. Ametlik nimi(NIMIametlik) vastab KKRi koodiga ühendatult KNR-ile
+kohanimed_rules6 <- validator(
+    # kas ametlikud nimed vastavad kohanimede registrile
+    NIMIametlikKKRkood = NIMIametlik %in% kohanimed$TAISNIMI & 
+        `KKR kood` %in% kohanimed$TUNNUS_REGISTRIS
+)
+
+check6 <- confront(EELIS06052022, kohanimed_rules6)#Rakendame reeglit
+summary(check6) #kokkuvõte tulemustest
+plot(check6)
+kohanimed_tulemus6= violating(EELIS06052022,check6)
+
+## koond. Muutmist vajavad väljad
+kohanimed_rulesKoond <- validator(
+    Muutmata = Nimi %in% kohanimed$TAISNIMI,
+    NIMIametlik = NIMIametlik %in% kohanimed$TAISNIMI,
+    Mitteametlik = NIMImtam %in% kohanimed$TAISNIMI,
+    Muud.nimed = `Muud nimed` %in% kohanimed$TAISNIMI,
+    Grupi.nimi = NIMIgrupp %in% kohanimed$TAISNIMI,
+    ROOPnimi = ROOPnimi.y %in% kohanimed$TAISNIMI,
+    NIMIametlikKKRkood = NIMIametlik %in% kohanimed$TAISNIMI & 
+        `KKR kood` %in% kohanimed$TUNNUS_REGISTRIS
+    
+    )
+
+check <- confront(EELIS06052022, kohanimed_rulesKoond)#Rakendame reeglit
+summary(check) #kokkuvõte tulemustest
+
+plot(check)
+
+summary(check) #kokkuvõte tulemustest
+
+################################
+### puuduolevad nimed kohanimede  registrist
+`%notin%` <- Negate(`%in%`)
+kohanimed_V = EELIS06052022[EELIS06052022$NIMIametlik %notin% kohanimed$TAISNIMI,]
+write.csv2(kohanimed_V,"Puuduvad_kohanimeregistrist_seisuga.06.05.22.csv")
+
+## vooluveekogude tüüpide lõikes
+kohanimed_pivot = kohanimed_V %>%
+    group_by(`Tüüp`) %>%
+    dplyr::summarize(count = n())
+
+###### Kontroll veeobjekti tüüpide lõikes ############
+
+kohanimed %>%
+    mutate(Tyyp = case_when(NIMEOBJEKTI_LIIK == 30201 ~ 'järvistu, järv, lais, järvesopp, laugas',
+                            NIMEOBJEKTI_LIIK == 30202 ~ 'tehisveekogu (veehoidla, paisjärv, tiik)',
+                            NIMEOBJEKTI_LIIK == 30301 ~ 'Jõgi', 
+                            NIMEOBJEKTI_LIIK == 30302 ~ 'Oja',
+                            NIMEOBJEKTI_LIIK == 30303 ~ 'Tehisveejuhe',
+                            NIMEOBJEKTI_LIIK == 30306 ~ 'Allikas',
+                            NIMEOBJEKTI_LIIK == 30304 ~ 'Muu (juga, kosk, kärestik, allikas)',
+                            NIMEOBJEKTI_LIIK == 30305 ~ 'Vesikond'
+    )) -> tyybid
+#table(kohanimed$NIMEOBJEKTI_LIIK)
+#table(EELIS06052022$`Tüüp`)
+
+EELIS06052022 %>%
+    mutate(NIMEOBJEKTI_LIIK = case_when(`Tüüp` == 'Jõgi' ~ 'Jõgi', 
+                                        `Tüüp` == 'Oja'  ~ 'Oja',
+                                        `Tüüp` == 'Kanal'  ~ 'Tehisveejuhe',
+                                        `Tüüp` == 'Kraav'  ~ 'Tehisveejuhe',                          
+                                        `Tüüp` == 'Peakraav'  ~ 'Tehisveejuhe',
+                                        `Tüüp` == 'Vooluveekogu'  ~ 'NA',
+                                        `Tüüp` == 'Looduslik järv'  ~ 'järvistu, järv, lais, järvesopp, laugas',
+                                        `Tüüp` == 'Paisjärv'  ~ 'tehisveekogu (veehoidla, paisjärv, tiik)',
+                                        `Tüüp` == 'Tehisjärv'  ~ 'tehisveekogu (veehoidla, paisjärv, tiik)',
+                                        `Tüüp` == 'Settebassein'  ~ 'tehisveekogu (veehoidla, paisjärv, tiik)',
+                                        `Tüüp` == 'Tiik'  ~ 'tehisveekogu (veehoidla, paisjärv, tiik)',
+                                        `Tüüp` == 'Rajatis'  ~ 'NA'
+                                        
+    )) -> EELISliigid
+
+
+## andmekvaliteedi reeglid
+#install.packages('validate')
+library(validate)
+# 0. Masinvõrreldav info nagu on EELISes andmestruktuuris
+tyybid_rules00 <- validator(
+    # kas EELISe objekti tüüp vastab KNR-s olevale tüübile
+    tyybid00 = NIMEOBJEKTI_LIIK %in% tyybid$Tyyp
+)
+
+tyybid00 <- confront(EELISliigid, tyybid_rules00)#Rakendame reeglit
+summary(tyybid00) #kokkuvõte tulemustest
+plot(tyybid00)
+tyybid_tulemus00= violating(EELISliigid,tyybid00)
+
+
+################################
+`%notin%` <- Negate(`%in%`)
+tyybid_V = EELISliigid[EELISliigid$NIMEOBJEKTI_LIIK %notin% tyybid$Tyyp,]
+
+## vooluveekogud tüüpide lõikes
+tyybid_pivot = tyybid_V %>%
+    group_by(NIMEOBJEKTI_LIIK) %>%
+    dplyr::summarize(count = n())
+
+
+
+
+```
+
+
+
+## Tulemused {.tabset}
+
+### Info
+
+**EELISe ja KNR-i andmestike kohanimede võrdluse tulemused**
+
+
+
+
+Fail on genereeritud seisuga `r Sys.time()`, andmed  EELISest on seisuga  06.05.2022 ja KNR-ist 29.03.2022.
+
+
+<br>
+
+Tekkinud Küsimused:
+
+*KN_ryhmitatud failis ruumiobjektidel ei ole KKR koodi. Kas see peab neil olema ja on lihtsalt päringus puudu?*
+
+
+### Probleemi kirjeldus 
+
+
+Keskkonnaportaali ruumiobjektid (sh kohanimed) hallatakse Eesti looduse infosüsteemis (EELIS), mis on küllaltki vana legacy-infosüsteem ja seetõttu ka tehnoloogiliselt aegunud (puuduvad liidestused). Mõned aastad on suuremad arendused on ka edasi lükatud, sest vajalik oleks kogu EELISe platvormi uuendamine ning hetkel on see IT-arendus käimas. Selle käigus tekkis probleem, et vahepeal on tekkinud õigusaktid, mis ütlevad, et kui tegu on kohanimedega siis peavad need vastavama kohanimeregistrile (KNR).
+<br>
+    Probleem seisneb selles, et EELISes ja KNRis ei klapi kohanimed. Kohanimed on vaja ära parandada, et need oleksid ajakohased ja migreerimisel vanast EELISest uude EELISesse oleksid andmed korras. Kontrolluuringu käigus töötati välja andmekvaliteedi reeglid, mille eesmärk oli tuvastada EELISes olevad kohanimed, mis ei vasta kohanimeregistris olevatele kohanimedele. Tegemist on üsna mahuka probleemiga ja alustusteks on valitud vooluveekogud ja seisuveekogud. 
+
+
+
+### Andmekontrollid
+
+Andmekontrollid näitavad probleemide ulatust ja kui objekte ei vasta andmekvaliteedi reeglitele.
+
+
+<br>
+Vooluveekogude andmete võrdlemise tulemused: kontrolliti skriptiga `r nrow(EELIS06052022)` EELISe registriobjekti, mille tüübiks oli: *kraav, peakraav, kanal, oja, jõgi, vooluveekogu, looduslik järv, paisjärv, tehisjärv, settebassein, tiik, rajatis*. <br>
+* *Rajatis on tehisjärve alamtüüp.*
+
+<br>
+Kohanimed on sisestatud EELISesse neljal erineval kujul:
+
+*ametlik põhinimi*<br>
+*ametlik põhinimi / ametlik rööpnimi*<br>
+*ametlik põhinimi (muu mitteametlik nimi)*<br>
+*(grupi nimi)*
+<br><br>
+
+**ANDMEKVALITEEDI REEGLID**
+
+1.	kas EELISe objekti nimi muutmata kujul vastab kohanimele (Muutmata)
+<br>
+2.	kas EELISe ametlikud põhinimed vastavavad kohanimede registrile (NIMIametlik)
+<br>
+3.	kas EELISe mitteametlikud nimed vastavad kohanimede registrile (Mitteametlik)
+<br>
+4.	kas „muud nimed“ tulbas olev info vastab kohanimede registrile (Muud.nimed)
+<br>
+5. 	kas EELISe grupi nimed vastavad kohanimede registrile (Grupi.nimi)
+<br>
+6. 	kas EELISe ametlikud rööpnimed vastavad kohanimede registrile (ROOPnimi)
+<br>
+7.	kas EELISe ametlikud põhinimed ja KKR koodid ühendatult vastavavad kohanimede registrile (NIMIametlikKKRkood)
+
+
+<br>
+
+**KOONDTULEMUSED**
+
+```{r}
+plot(check)
+```
+<br>
+<br>
+**Andmekontrollide tulemuste koond**
+```{r}
+datatable(summary(check))
+```
+
+### Reegel 1 
+
+**Reegel, mis kontrollib kas EELISe objekti nimi muutmata kujul vastab kohanimele KNRis.**
+
+Joonisel on välja toodud valideerimise tulemused, kust selgub, et 44% EELISe kohanimedest ei vasta KNR-is olevatele kohanimedele. Detailsem väljavõte neist kohanimedest on koondatud Tabelisse 1.
+
+
+```{r}
+plot(check0)
+```
+<br>
+
+**Andmekontrolli tulemused**
+
+
+```{r}
+datatable(summary(check0))
+```
+
+<br><br>
+**Detailne väljavõte reeglit rikkuvatest objektidest**
+
+
+```{r}
+
+datatable(kohanimed_tulemus0,
+             caption = 'Tabel 1: EELISe kohanimed muutmata kujul, mis ei vasta KNRis olevatele kohanimedele',
+             class = 'cell-border stripe',
+             #editable = 'cell',
+             filter = 'top',
+             
+             selection = list(mode='single',selected = 1,target = 'row'),
+             extensions = c('Buttons', 'ColReorder'),
+             options = list(dom = 'Bfrtip',
+                            pageLength = 10,
+                            lengthMenu = c(10, 100, 300, 1000),
+                            autoWidth = TRUE,
+                            buttons = list("copy",
+                                           'csv',
+                                           'excel', 
+                                           'pdf', 
+                                           'print',
+                                           list(extend = "colvis",
+                                                text = "Lisatulbad",
+                                                columns = c(1,9,10))),
+                            columnDefs = list(list(targets = c(1,9,10), visible = FALSE)),
+                            language = list(paginate = 
+                                           list('next'="eelmine", 
+                                                "previous"="järgmine"
+                                                ),
+                                           search ="otsi",
+                                           info ="Üldjuhul kui tulbas 'Menetlusfaas' olev kommentaar on menetluses, siis tegemist ei ole registriobjektiga, vaid mitteametliku nimega."
+                                           )
+  )
+)
+
+
+```
+### Reegel 2
+**Reegel, mis kontrollib kas EELISe ametlikud põhinimed vastavavad kohanimede registrile (NIMIametlik).**
+
+Joonisel on välja toodud valideerimise tulemused, kust selgub, et 35% EELISe ametlikest kohanimedest ei vasta KNR-is olevatele kohanimedele. Detailsem väljavõte neist kohanimedest on koondatud Tabelisse 2.
+
+
+```{r}
+plot(check1)
+```
+<br>
+
+**Andmekontrolli tulemused**
+
+
+```{r}
+datatable(summary(check1))
+```
+
+<br><br>
+**Detailne väljavõte reeglit rikkuvatest objektidest**
+
+
+```{r}
+
+datatable(kohanimed_tulemus1,
+             caption = 'Tabel 2: EELISe ametlikud põhinimed, mis ei vasta KNRis olevatele kohanimedele',
+             class = 'cell-border stripe',
+             #editable = 'cell',
+             filter = 'top',
+             
+             selection = list(mode='single',selected = 1,target = 'row'),
+             extensions = c('Buttons', 'ColReorder'),
+             options = list(dom = 'Bfrtip',
+                            pageLength = 10,
+                            lengthMenu = c(10, 100, 300, 1000),
+                            autoWidth = TRUE,
+                            buttons = list("copy",
+                                           'csv',
+                                           'excel', 
+                                           'pdf', 
+                                           'print',
+                                           list(extend = "colvis",
+                                                text = "Lisatulbad",
+                                                columns = c(1,9,10))),
+                            columnDefs = list(list(targets = c(1,9,10), visible = FALSE)),
+                            language = list(paginate = 
+                                           list('next'="eelmine", 
+                                                "previous"="järgmine"
+                                                ),
+                                           search ="otsi",
+                                           info ="Üldjuhul kui tulbas 'Menetlusfaas' olev kommentaar on menetluses, siis tegemist ei ole registriobjektiga, vaid mitteametliku nimega."
+                                           )
+  )
+)
+
+
+```
+### Reegel 3
+**Reegel, mis kontrollib, kas EELISe mitteametlikud nimed vastavad kohanimede registrile (Mitteametlik).**
+
+Joonisel on välja toodud valideerimise tulemused, kust selgub, et 9% juhtudel EELISe mitteametlikud kohanimed ei vasta KNR-is olevatele kohanimedele. Detailsem väljavõte neist kohanimedest on koondatud Tabelisse 3.
+
+
+```{r}
+plot(check2)
+```
+<br>
+
+**Andmekontrolli tulemused**
+
+
+```{r}
+datatable(summary(check2))
+```
+<br><br>
+
+**Detailne väljavõte reeglit rikkuvatest objektidest**
+
+
+```{r}
+
+datatable(kohanimed_tulemus2,
+             caption = 'Tabel 3: EELISe mitteametlikud nimed, mis ei vasta KNRis olevatele kohanimedele',
+             class = 'cell-border stripe',
+             #editable = 'cell',
+             filter = 'top',
+             
+             selection = list(mode='single',selected = 1,target = 'row'),
+             extensions = c('Buttons', 'ColReorder'),
+             options = list(dom = 'Bfrtip',
+                            pageLength = 10,
+                            lengthMenu = c(10, 100, 300, 1000),
+                            autoWidth = TRUE,
+                            buttons = list("copy",
+                                           'csv',
+                                           'excel', 
+                                           'pdf', 
+                                           'print',
+                                           list(extend = "colvis",
+                                                text = "Lisatulbad",
+                                                columns = c(1,9,10))),
+                            columnDefs = list(list(targets = c(1,9,10), visible = FALSE)),
+                            language = list(paginate = 
+                                           list('next'="eelmine", 
+                                                "previous"="järgmine"
+                                                ),
+                                           search ="otsi",
+                                           info =""
+                                           )
+  )
+)
+
+```
+### Reegel 4
+**Reegel, mis kontrollib kas „muud nimed“ tulbas olev info vastab kohanimede registrile (Muud.nimed).**
+
+Joonisel on välja toodud valideerimise tulemused, kust selgub, et 13% juhtudel „muud nimed“ tulbas olevad kohanimed ei vasta KNR-is olevatele kohanimedele. Detailsem väljavõte neist kohanimedest on koondatud Tabelisse 4.
+
+
+```{r}
+plot(check3)
+```
+
+<br>
+**Andmekontrolli tulemused**
+
+```{r}
+datatable(summary(check3))
+```
+<br><br>
+
+**Detailne väljavõte reeglit rikkuvatest objektidest**
+
+```{r}
+
+datatable(kohanimed_tulemus3,
+             caption = 'Tabel 4: „muud nimed“ tulbas olevad kohanimed, mis ei vasta KNRis olevatele kohanimedele',
+             class = 'cell-border stripe',
+             #editable = 'cell',
+             filter = 'top',
+             
+             selection = list(mode='single',selected = 1,target = 'row'),
+             extensions = c('Buttons', 'ColReorder'),
+             options = list(dom = 'Bfrtip',
+                            pageLength = 10,
+                            lengthMenu = c(10, 100, 300, 1000),
+                            autoWidth = TRUE,
+                            buttons = list("copy",
+                                           'csv',
+                                           'excel', 
+                                           'pdf', 
+                                           'print',
+                                           list(extend = "colvis",
+                                                text = "Lisatulbad",
+                                                columns = c(1,9,10))),
+                            columnDefs = list(list(targets = c(1,9,10), visible = FALSE)),
+                            language = list(paginate = 
+                                           list('next'="eelmine", 
+                                                "previous"="järgmine"
+                                                ),
+                                           search ="otsi",
+                                           info =""
+                                           )
+  )
+)
+
+
+```
+### Reegel 5
+**Reegel, mis kontrollib kas EELISe grupi nimed vastavad kohanimede registrile (Grupi.nimi).**
+
+Joonisel on välja toodud valideerimise tulemused, kust selgub, et 3% juhtudel EELISe grupi nimed ei vasta KNR-is olevatele kohanimedele. Detailsem väljavõte neist kohanimedest on koondatud Tabelisse 5.
+
+```{r}
+plot(check4)
+```
+
+<br>
+**Andmekontrolli tulemused**
+
+
+```{r}
+datatable(summary(check4))
+```
+<br><br>
+**Detailne väljavõte reeglit rikkuvatest objektidest**
+
+
+```{r}
+
+datatable(kohanimed_tulemus4,
+             caption = 'Tabel 5: grupi nimed, mis ei vasta KNRis olevatele kohanimedele',
+             class = 'cell-border stripe',
+             #editable = 'cell',
+             filter = 'top',
+             
+             selection = list(mode='single',selected = 1,target = 'row'),
+             extensions = c('Buttons', 'ColReorder'),
+             options = list(dom = 'Bfrtip',
+                            pageLength = 10,
+                            lengthMenu = c(10, 100, 300, 1000),
+                            autoWidth = TRUE,
+                            buttons = list("copy",
+                                           'csv',
+                                           'excel', 
+                                           'pdf', 
+                                           'print',
+                                           list(extend = "colvis",
+                                                text = "Lisatulbad",
+                                                columns = c(1,9,10))),
+                            columnDefs = list(list(targets = c(1,9,10), visible = FALSE)),
+                            language = list(paginate = 
+                                           list('next'="eelmine", 
+                                                "previous"="järgmine"
+                                                ),
+                                           search ="otsi",
+                                           info =""
+                                           )
+  )
+)
+
+
+```
+### Reegel 6
+**Reegel, mis kontrollib kas EELISe ametlikud rööpnimed vastavad kohanimede registrile (Grupi.nimi)**
+
+Joonisel on välja toodud valideerimise tulemused, kust selgub, et 33 rööpnime ei vasta KNR-is olevatele kohanimedele. Detailsem väljavõte neist kohanimedest on koondatud Tabelisse 6.
+
+```{r}
+plot(check5)
+```
+<br>
+
+**Andmekontrolli tulemused**
+
+
+```{r}
+datatable(summary(check5))
+```
+<br><br>
+**Detailne väljavõte reeglit rikkuvatest objektidest**
+
+
+```{r}
+
+datatable(kohanimed_tulemus5,
+             caption = 'Tabel 6: ametlikud rööpnimed, mis ei vasta KNRis olevatele kohanimedele',
+             class = 'cell-border stripe',
+             #editable = 'cell',
+             filter = 'top',
+             
+             selection = list(mode='single',selected = 1,target = 'row'),
+             extensions = c('Buttons', 'ColReorder'),
+             options = list(dom = 'Bfrtip',
+                            pageLength = 10,
+                            lengthMenu = c(10, 100, 300, 1000),
+                            autoWidth = TRUE,
+                            buttons = list("copy",
+                                           'csv',
+                                           'excel', 
+                                           'pdf', 
+                                           'print',
+                                           list(extend = "colvis",
+                                                text = "Lisatulbad",
+                                                columns = c(1,9,10))),
+                            columnDefs = list(list(targets = c(1,9,10), visible = FALSE)),
+                            language = list(paginate = 
+                                           list('next'="eelmine", 
+                                                "previous"="järgmine"
+                                                ),
+                                           search ="otsi",
+                                           info =""
+                                           )
+  )
+)
+
+
+```
+### Reegel 7
+**Reegel, mis kontrollib kas EELISe ametlikud põhinimed ja KKR koodid ühendatult vastavavad kohanimede registrile (MIMIametlikKKRkood).**
+
+Joonisel on välja toodud valideerimise tulemused, kust selgub, et 44% EELISe kohanimedest ei vasta KNR-is olevatele kohanimedele. Detailsem väljavõte neist kohanimedest on koondatud Tabelisse 7.
+
+```{r}
+plot(check6)
+```
+<br>
+**Andmekontrolli tulemused**
+
+
+```{r}
+datatable(summary(check6))
+```
+<br><br>
+**Detailne väljavõte reeglit rikkuvatest objektidest**
+
+
+```{r}
+
+datatable(kohanimed_tulemus6,
+             caption = 'Tabel 7: EELISe ametlikud põhinimed ja KKR koodid ühendatult, mis ei vasta kohanimede registrile',
+             class = 'cell-border stripe',
+             #editable = 'cell',
+             filter = 'top',
+             
+             selection = list(mode='single',selected = 1,target = 'row'),
+             extensions = c('Buttons', 'ColReorder'),
+             options = list(dom = 'Bfrtip',
+                            pageLength = 10,
+                            lengthMenu = c(10, 100, 300, 1000),
+                            autoWidth = TRUE,
+                            buttons = list("copy",
+                                           'csv',
+                                           'excel', 
+                                           'pdf', 
+                                           'print',
+                                           list(extend = "colvis",
+                                                text = "Lisatulbad",
+                                                columns = c(1,9,10))),
+                            columnDefs = list(list(targets = c(1,9,10), visible = FALSE)),
+                            language = list(paginate = 
+                                           list('next'="eelmine", 
+                                                "previous"="järgmine"
+                                                ),
+                                           search ="otsi",
+                                           info =""
+                                           )
+  )
+)
+
+
+```
+### Puuduolevad nimed kohanimeregistrist 
+
+**Kohanimede registrist puuduolevad andmed, kuid on olemas EELISes.**
+ 
+```{r}
+
+datatable(kohanimed_V,
+             caption = 'Tabel 8: kohanimede  registrist puuduolevad andmed',
+             class = 'cell-border stripe',
+             #editable = 'cell',
+             filter = 'top',
+             
+             selection = list(mode='single',selected = 1,target = 'row'),
+             extensions = c('Buttons', 'ColReorder'),
+             options = list(dom = 'Bfrtip',
+                            pageLength = 10,
+                            lengthMenu = c(10, 100, 300, 1000),
+                            autoWidth = TRUE,
+                            buttons = list("copy",
+                                           'csv',
+                                           'excel', 
+                                           'pdf', 
+                                           'print',
+                                           list(extend = "colvis",
+                                                text = "Lisatulbad",
+                                                columns = c(1,9,10))),
+                            columnDefs = list(list(targets = c(1,9,10), visible = FALSE)),
+                            language = list(paginate = 
+                                           list('next'="eelmine", 
+                                                "previous"="järgmine"
+                                                ),
+                                           search ="otsi",
+                                           info =""
+                                           )
+  )
+)
+
+```
+
+
+### Tüüpide kontroll
+
+
+**PUUDUOLEVAD NIMED KOHANIMEREGISTRIST TÜÜPIDE LÕIKES**
+```{r}
+
+datatable(kohanimed_pivot,
+             caption = 'Tabel 9: Kohanimede  registrist puuduolevad andmed tüüpide lõikes',
+             class = 'cell-border stripe',
+             #editable = 'cell',
+             filter = 'top',
+             
+             selection = list(mode='single',selected = 1,target = 'row'),
+             extensions = c('Buttons', 'ColReorder'),
+             options = list(dom = 'Bfrtip',
+                            pageLength = 10,
+                            
+                            autoWidth = TRUE,
+                            buttons = list("copy",
+                                           'csv',
+                                           'excel', 
+                                           'pdf', 
+                                           'print',
+                                           list(extend = "colvis",
+                                                text = "Lisatulbad"))
+                            ))
+
+```
+<br><br>
+**Reegel, mis kontrollib  kas EELISe objekti tüüp vastab KNR-s olevale tüübile.**
+
+Joonisel on välja toodud valideerimise tulemused, kust selgub, et 75% juhtudel EELISes olev objekti tüüp vastab KNR-is olevale tüübile, ülejäänud juhtudel info objekti tüübi kohta puudub. 
+
+
+```{r}
+plot(tyybid00)
+```
+<br>
+
+**Andmekontrolli tulemused**
+
+<br>
+```{r}
+datatable(summary(tyybid00))
+```
+
+
+
+
+
+
+
+End of line!
+
+#rmarkdown::render("EELIS_kohanimed_seisuveekogud_raport.Rmd")
